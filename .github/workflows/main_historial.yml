@@ -52,6 +52,7 @@ jobs:
             package.json
             package-lock.json
             prisma/
+          include-hidden-files: true
 
   deploy:
     runs-on: ubuntu-latest
