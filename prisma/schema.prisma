@@ -1,0 +1,58 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String        @id @default(cuid())
+  firebaseUid  String        @unique
+  email        String?
+  name         String?
+  avatarUrl    String?
+  role         Role          @default(USER)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  lastActiveAt DateTime?
+  messages     ChatMessage[]
+  changeLogs   ChangeLog[]
+  estatus      Estatus       @default(ACTIVE)
+}
+
+enum Estatus {
+  ACTIVE
+  INACTIVE
+  BLOCKED
+}
+
+enum Role {
+  GUEST
+  USER
+  ADMIN
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  content   String
+  createdAt DateTime @default(now())
+}
+
+model ChangeLog {
+  id         String   @id @default(cuid())
+  eventId    String?  @unique
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  simId      String
+  entityType String
+  entityId   String
+  field      String
+  message    String
+  timestamp  DateTime @default(now())
+
+  @@index([simId, timestamp])
+}
