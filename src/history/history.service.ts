@@ -12,6 +12,66 @@ export class HistoryService {
     this.wsServer = server;
   }
 
+  async saveChange(data: {
+    userId: string;
+    simId: string;
+    entityType: string;
+    entityId: string;
+    field: string;
+    oldValue: string;
+    newValue: string;
+  }) {
+    const user = await this.prisma.user.findUnique({
+      where: { firebaseUid: data.userId },
+    });
+
+    let userName = 'Unknown';
+    if (user) {
+      userName = user.name || user.email || 'Unknown';
+    }
+
+    let message = `${data.field}: ${data.oldValue} -> ${data.newValue}`;
+    
+    // Handle special cases for deleted/created entities
+    if (data.field === 'deleted') {
+      message = `deleted:  -> `;
+    } else if (data.field === 'created') {
+      message = `created:  -> ${data.newValue}`;
+    }
+
+    const changeLog = await this.prisma.changeLog.create({
+      data: {
+        user: { connect: { firebaseUid: data.userId } },
+        userName,
+        simId: data.simId,
+        entityType: data.entityType,
+        entityId: data.entityId,
+        field: data.field,
+        message,
+      },
+    });
+
+    // Emit via WebSocket if server is set
+    if (this.wsServer) {
+      this.emitHistory(
+        {
+          id: changeLog.id,
+          userId: changeLog.userId,
+          userName: changeLog.userName,
+          entityType: changeLog.entityType,
+          entityId: changeLog.entityId,
+          field: changeLog.field,
+          oldValue: data.oldValue,
+          newValue: data.newValue,
+          timestamp: changeLog.timestamp.getTime(),
+        },
+        data.simId,
+      );
+    }
+
+    return changeLog;
+  }
+
   emitHistory(entry: Record<string, unknown>, simId: string) {
     if (!this.wsServer) return;
     this.wsServer.to(`sim:${simId}`).emit('history:new', entry);
@@ -46,7 +106,7 @@ export class HistoryService {
         entityId: event.entity.id,
         action: event.action,
         commandType: event.commandType,
-payload: event.payload as any,
+        payload: event.payload as any,
         before: event.before as any,
         after: event.after as any,
         field: event.action,

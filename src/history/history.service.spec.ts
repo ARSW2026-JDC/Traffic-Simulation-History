@@ -61,6 +61,7 @@ describe('HistoryService', () => {
       prismaMock.changeLog.create.mockResolvedValue({
         ...mockChangeLog,
         userId: 'user-1',
+        userName: mockUser.name,
       });
 
       const result = await service.saveChange({
@@ -81,17 +82,20 @@ describe('HistoryService', () => {
           entityId: 'V-001',
           field: 'speed',
           message: 'speed: 20 -> 30',
+          userName: mockUser.name,
         },
       });
       expect(result.entityType).toBe('vehicle');
       expect(result.entityId).toBe('V-001');
+      expect(result.userName).toBe(mockUser.name);
     });
 
     it('should use Unknown when user is not found', async () => {
       prismaMock.user.findUnique.mockResolvedValue(null);
       prismaMock.changeLog.create.mockResolvedValue({
         ...mockChangeLog,
-        userId: 'unknown',
+        userId: 'unknown-uid',
+        userName: 'Unknown',
       });
 
       const result = await service.saveChange({
@@ -104,6 +108,17 @@ describe('HistoryService', () => {
         newValue: '30',
       });
 
+      expect(prismaMock.changeLog.create).toHaveBeenCalledWith({
+        data: {
+          user: { connect: { firebaseUid: 'unknown-uid' } },
+          simId: 'sim-1',
+          entityType: 'vehicle',
+          entityId: 'V-001',
+          field: 'speed',
+          message: 'speed: 20 -> 30',
+          userName: 'Unknown',
+        },
+      });
       expect(result.userName).toBe('Unknown');
     });
 
@@ -113,6 +128,7 @@ describe('HistoryService', () => {
         ...mockChangeLog,
         field: 'deleted',
         message: 'deleted:  -> ',
+        userName: mockUser.name,
       });
 
       const result = await service.saveChange({
@@ -125,7 +141,19 @@ describe('HistoryService', () => {
         newValue: '',
       });
 
+      expect(prismaMock.changeLog.create).toHaveBeenCalledWith({
+        data: {
+          user: { connect: { firebaseUid: 'firebase-uid-1' } },
+          simId: 'sim-1',
+          entityType: 'vehicle',
+          entityId: 'V-001',
+          field: 'deleted',
+          message: 'deleted:  -> ',
+          userName: mockUser.name,
+        },
+      });
       expect(result.field).toBe('deleted');
+      expect(result.userName).toBe(mockUser.name);
     });
 
     it('should handle created entities', async () => {
@@ -134,6 +162,7 @@ describe('HistoryService', () => {
         ...mockChangeLog,
         field: 'created',
         message: 'created:  -> 1',
+        userName: mockUser.name,
       });
 
       const result = await service.saveChange({
@@ -146,7 +175,19 @@ describe('HistoryService', () => {
         newValue: '1',
       });
 
+      expect(prismaMock.changeLog.create).toHaveBeenCalledWith({
+        data: {
+          user: { connect: { firebaseUid: 'firebase-uid-1' } },
+          simId: 'sim-1',
+          entityType: 'vehicle',
+          entityId: 'batch',
+          field: 'created',
+          message: 'created:  -> 1',
+          userName: mockUser.name,
+        },
+      });
       expect(result.field).toBe('created');
+      expect(result.userName).toBe(mockUser.name);
     });
   });
 
