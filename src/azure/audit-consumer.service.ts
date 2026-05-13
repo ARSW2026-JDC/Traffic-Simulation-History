@@ -21,6 +21,13 @@ interface AuditEvent {
     avatarUrl?: string;
   };
   commandType: string;
+  action: 'add' | 'modify' | 'delete';
+  entity: {
+    type: 'vehicle' | 'trafficLight';
+    id: string;
+  };
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
   payload: Record<string, unknown>;
   occurredAt: number;
 }
@@ -64,7 +71,7 @@ export class AuditConsumerService implements OnModuleInit, OnModuleDestroy {
             msg: 'Service Bus error',
             error: args.error.message,
           }),
-      });
+      }, { autoCompleteMessages: false });
     } catch (err) {
       this.logger.error({
         msg: 'Failed to initialize Service Bus consumer',
@@ -85,6 +92,7 @@ export class AuditConsumerService implements OnModuleInit, OnModuleDestroy {
     const event = this.parseEvent(message);
     if (!event) {
       this.logger.warn({ msg: 'Failed to parse event', correlationId });
+      await this.deadLetter(message, 'SchemaValidationFailed', 'Invalid audit payload');
       return;
     }
 
@@ -94,29 +102,36 @@ export class AuditConsumerService implements OnModuleInit, OnModuleDestroy {
         eventId: event.eventId,
         correlationId,
       });
+      await this.deadLetter(message, 'SchemaValidationFailed', 'Missing actor');
+      return;
+    }
+
+    if (!event.action || !event.entity?.type || !event.entity?.id) {
+      this.logger.warn({
+        msg: 'Audit event missing entity/action',
+        eventId: event.eventId,
+        correlationId,
+      });
+      await this.deadLetter(message, 'SchemaValidationFailed', 'Missing entity or action');
       return;
     }
 
     await this.ensureUser(event);
-    const change = this.mapAuditEvent(event);
-    if (!change) {
-      this.logger.warn({
-        msg: 'Failed to map audit event',
-        eventId: event.eventId,
-        commandType: event.commandType,
-      });
-      return;
-    }
-
     try {
-      const entry = await this.historyService.saveChange(change);
+      const entry = await this.historyService.saveAuditEvent(event);
       this.historyService.emitHistory(entry, event.simId);
+      await this.receiver?.completeMessage(message);
     } catch (err) {
+      if (err?.code === 'P2002') {
+        await this.receiver?.completeMessage(message);
+        return;
+      }
       this.logger.error({
         msg: 'Failed to persist audit event',
         eventId: event.eventId,
         error: err.message,
       });
+      await this.deadLetter(message, 'PersistenceFailed', 'Failed to persist audit event');
     }
   }
 
@@ -151,118 +166,21 @@ export class AuditConsumerService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private mapAuditEvent(event: AuditEvent) {
-    const { entityType, entityId, field, oldValue, newValue } =
-      this.extractChange(event);
-    if (!entityType || !entityId || !field) return null;
-    return {
-      userId: event.actor.uid,
-      simId: event.simId,
-      entityType,
-      entityId,
-      field,
-      oldValue,
-      newValue,
-    };
-  }
-
-  private extractChange(event: AuditEvent) {
-    switch (event.commandType) {
-      case 'edit_vehicle': {
-        const vehicleId = String(event.payload.vehicleId ?? '');
-        const speed = this.toNumber(event.payload.speed);
-        const color = this.toString(event.payload.color);
-        if (speed !== null) {
-          return {
-            entityType: 'vehicle',
-            entityId: vehicleId,
-            field: 'speed',
-            oldValue: '',
-            newValue: speed.toString(),
-          };
-        }
-        if (color) {
-          return {
-            entityType: 'vehicle',
-            entityId: vehicleId,
-            field: 'color',
-            oldValue: '',
-            newValue: color,
-          };
-        }
-        return {
-          entityType: 'vehicle',
-          entityId: vehicleId,
-          field: 'profile',
-          oldValue: '',
-          newValue: this.toString(event.payload.profile),
-        };
-      }
-      case 'remove_vehicle': {
-        const vehicleId = String(event.payload.vehicleId ?? '');
-        return {
-          entityType: 'vehicle',
-          entityId: vehicleId,
-          field: 'deleted',
-          oldValue: '',
-          newValue: '',
-        };
-      }
-      case 'add_vehicle':
-      case 'add_vehicles': {
-        const count =
-          this.toNumber(event.payload.count ?? event.payload.cantidad) ?? 1;
-        return {
-          entityType: 'vehicle',
-          entityId: 'batch',
-          field: 'created',
-          oldValue: '',
-          newValue: count.toString(),
-        };
-      }
-      case 'remove_trafficLight': {
-        const nodeId = this.toString(event.payload.nodeId);
-        return {
-          entityType: 'trafficLight',
-          entityId: nodeId,
-          field: 'deleted',
-          oldValue: '',
-          newValue: '',
-        };
-      }
-      case 'add_traffic_light': {
-        return {
-          entityType: 'trafficLight',
-          entityId: 'new',
-          field: 'created',
-          oldValue: '',
-          newValue: '',
-        };
-      }
-      default:
-        return {
-          entityType: 'simulation',
-          entityId: event.simId,
-          field: event.commandType,
-          oldValue: '',
-          newValue: '',
-        };
+  private async deadLetter(
+    message: ServiceBusReceivedMessage,
+    reason: string,
+    description: string,
+  ) {
+    try {
+      await this.receiver?.deadLetterMessage(message, {
+        deadLetterReason: reason,
+        deadLetterErrorDescription: description,
+      });
+    } catch (err) {
+      this.logger.warn({
+        msg: 'Failed to dead-letter message',
+        error: err.message,
+      });
     }
-  }
-
-  private toNumber(value: unknown) {
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-    if (typeof value === 'string') {
-      const parsed = Number.parseFloat(value);
-      return Number.isFinite(parsed) ? parsed : null;
-    }
-    return null;
-  }
-
-  private toString(value: unknown) {
-    if (typeof value === 'string') return value;
-    if (typeof value === 'number' && Number.isFinite(value))
-      return value.toString();
-    return '';
   }
 }

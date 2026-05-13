@@ -47,9 +47,15 @@ model ChangeLog {
   eventId    String?  @unique
   userId     String
   user       User     @relation(fields: [userId], references: [id])
+  userName   String?
   simId      String
   entityType String
   entityId   String
+  action     String?
+  commandType String?
+  payload    Json?
+  before     Json?
+  after      Json?
   field      String
   message    String
   timestamp  DateTime @default(now())
