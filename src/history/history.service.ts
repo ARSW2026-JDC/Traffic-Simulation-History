@@ -12,59 +12,62 @@ export class HistoryService {
     this.wsServer = server;
   }
 
-  emitHistory(
-    entry: {
-      id: string;
-      userId: string;
-      userName: string;
-      entityType: string;
-      entityId: string;
-      field: string;
-      oldValue: string;
-      newValue: string;
-      timestamp: number;
-    },
-    simId: string,
-  ) {
+  emitHistory(entry: Record<string, unknown>, simId: string) {
     if (!this.wsServer) return;
     this.wsServer.to(`sim:${simId}`).emit('history:new', entry);
   }
 
-  async saveChange(data: {
-    userId: string;
+  async saveAuditEvent(event: {
+    eventId: string;
     simId: string;
-    entityType: string;
-    entityId: string;
-    field: string;
-    oldValue: string;
-    newValue: string;
+    actor: { uid: string; name: string; avatarUrl?: string };
+    commandType: string;
+    action: 'add' | 'modify' | 'delete';
+    entity: { type: string; id: string };
+    before: Record<string, unknown> | null;
+    after: Record<string, unknown> | null;
+    payload: Record<string, unknown>;
+    occurredAt: number;
   }) {
     const user = await this.prisma.user.findUnique({
-      where: { firebaseUid: data.userId },
+      where: { firebaseUid: event.actor.uid },
       select: { name: true, email: true },
     });
+    const userName = event.actor.name || user?.name || user?.email || 'Sistema';
+    const message = `${event.action}: ${event.entity.type}`;
 
-    const message = `${data.field}: ${data.oldValue} -> ${data.newValue}`;
     const entry = await this.prisma.changeLog.create({
       data: {
-        user: { connect: { firebaseUid: data.userId } },
-        simId: data.simId,
-        entityType: data.entityType,
-        entityId: data.entityId,
-        field: data.field,
+        eventId: event.eventId,
+        user: { connect: { firebaseUid: event.actor.uid } },
+        userName,
+        simId: event.simId,
+        entityType: event.entity.type,
+        entityId: event.entity.id,
+        action: event.action,
+        commandType: event.commandType,
+payload: event.payload as any,
+        before: event.before as any,
+        after: event.after as any,
+        field: event.action,
         message,
+        timestamp: new Date(event.occurredAt),
       },
     });
 
     return {
       id: entry.id,
+      eventId: entry.eventId,
       userId: entry.userId,
-      userName: user?.name || user?.email || 'Unknown',
+      userName: entry.userName || userName,
       entityType: entry.entityType,
       entityId: entry.entityId,
+      action: entry.action,
+      commandType: entry.commandType,
+      payload: entry.payload,
+      before: entry.before,
+      after: entry.after,
       field: entry.field,
-      oldValue: data.oldValue,
-      newValue: data.newValue,
       timestamp: entry.timestamp.getTime(),
     };
   }
@@ -74,16 +77,22 @@ export class HistoryService {
       take: limit,
       ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
       ...(simId ? { where: { simId } } : {}),
-      orderBy: { timestamp: 'desc' },
+      orderBy: [{ timestamp: 'desc' }, { id: 'desc' }],
       include: { user: { select: { name: true, email: true } } },
     });
     return entries.map((e) => ({
       ...this.parseMessage(e.message),
       id: e.id,
+      eventId: e.eventId,
       userId: e.userId,
-      userName: e.user.name || e.user.email,
+      userName: e.userName || e.user.name || e.user.email,
       entityType: e.entityType,
       entityId: e.entityId,
+      action: e.action,
+      commandType: e.commandType,
+      payload: e.payload,
+      before: e.before,
+      after: e.after,
       field: e.field,
       timestamp: e.timestamp.getTime(),
     }));

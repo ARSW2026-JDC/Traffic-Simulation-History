@@ -183,7 +183,7 @@ describe('HistoryService', () => {
 
       expect(prismaMock.changeLog.findMany).toHaveBeenCalledWith({
         take: 50,
-        orderBy: { timestamp: 'desc' },
+        orderBy: [{ timestamp: 'desc' }, { id: 'desc' }],
         include: { user: { select: { name: true, email: true } } },
       });
       expect(result).toHaveLength(2);
@@ -197,7 +197,7 @@ describe('HistoryService', () => {
       expect(prismaMock.changeLog.findMany).toHaveBeenCalledWith({
         take: 50,
         where: { simId: 'sim-1' },
-        orderBy: { timestamp: 'desc' },
+        orderBy: [{ timestamp: 'desc' }, { id: 'desc' }],
         include: { user: { select: { name: true, email: true } } },
       });
       expect(result).toHaveLength(1);
@@ -234,7 +234,7 @@ describe('HistoryService', () => {
       expect(prismaMock.changeLog.findMany).toHaveBeenCalledWith({
         take: 10,
         where: { simId: 'sim-1' },
-        orderBy: { timestamp: 'desc' },
+        orderBy: [{ timestamp: 'desc' }, { id: 'desc' }],
         include: { user: { select: { name: true, email: true } } },
       });
     });
